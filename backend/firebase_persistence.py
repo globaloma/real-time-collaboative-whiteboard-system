@@ -2,26 +2,21 @@ import json
 import os
 import time
 
-try:
-    import firebase_admin
-    from firebase_admin import credentials, firestore
-except Exception:
-    firebase_admin = None
-    credentials = None
-    firestore = None
-
 COLLECTION_NAME = os.getenv("FIREBASE_COLLECTION_NAME", "whiteboard_rooms")
 
 _firestore_client = None
 _initialized = False
 _init_error = None
 
-# grpc (used by firebase-admin/google-cloud-firestore) manages its own native
-# threads and is not eventlet-green-thread-safe: a blocking Firestore call
-# made directly on an eventlet worker can freeze the entire cooperative event
-# loop, taking the whole process down with it. Routing those calls through
-# eventlet.tpool runs them on a real OS thread instead, sidestepping the
-# incompatibility. Only used when actually running under eventlet.
+# grpc (used internally by firebase-admin/google-cloud-firestore) is
+# documented to not survive fork(): its background completion-queue threads
+# exist in the parent process at the time of the fork but not in the child,
+# so a channel created — or even just imported — before gunicorn forks its
+# worker leaves the worker with grpc state that hangs on the first real RPC.
+# Both the import and initialization are therefore deferred to first use,
+# which only ever happens inside a worker process handling a real request —
+# the arbiter (master process) never does that, even though it does import
+# this module to resolve the app callable before forking.
 _USE_EVENTLET_TPOOL = os.getenv("SOCKETIO_ASYNC_MODE") == "eventlet"
 
 
@@ -33,23 +28,26 @@ def _run_blocking(fn):
     return fn()
 
 
-def _build_credentials():
+def _build_credentials(credentials_module):
     service_account_json = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
     service_account_path = os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH")
 
     if service_account_path:
-        return credentials.Certificate(service_account_path)
+        return credentials_module.Certificate(service_account_path)
 
     if service_account_json:
         data = json.loads(service_account_json)
-        return credentials.Certificate(data)
+        return credentials_module.Certificate(data)
 
     return None
 
 
 def _init_firestore_client():
+    import firebase_admin
+    from firebase_admin import credentials, firestore
+
     if not firebase_admin._apps:
-        cred = _build_credentials()
+        cred = _build_credentials(credentials)
         if cred is None:
             raise RuntimeError("Missing Firebase credentials")
         firebase_admin.initialize_app(cred)
@@ -64,10 +62,6 @@ def get_firestore_client():
         return _firestore_client
 
     _initialized = True
-
-    if firebase_admin is None or credentials is None or firestore is None:
-        _init_error = "firebase-admin is not installed"
-        return None
 
     try:
         _firestore_client = _run_blocking(_init_firestore_client)
