@@ -16,6 +16,22 @@ _firestore_client = None
 _initialized = False
 _init_error = None
 
+# grpc (used by firebase-admin/google-cloud-firestore) manages its own native
+# threads and is not eventlet-green-thread-safe: a blocking Firestore call
+# made directly on an eventlet worker can freeze the entire cooperative event
+# loop, taking the whole process down with it. Routing those calls through
+# eventlet.tpool runs them on a real OS thread instead, sidestepping the
+# incompatibility. Only used when actually running under eventlet.
+_USE_EVENTLET_TPOOL = os.getenv("SOCKETIO_ASYNC_MODE") == "eventlet"
+
+
+def _run_blocking(fn):
+    if _USE_EVENTLET_TPOOL:
+        import eventlet.tpool
+
+        return eventlet.tpool.execute(fn)
+    return fn()
+
 
 def _build_credentials():
     service_account_json = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
@@ -28,9 +44,17 @@ def _build_credentials():
         data = json.loads(service_account_json)
         return credentials.Certificate(data)
 
-    
-
     return None
+
+
+def _init_firestore_client():
+    if not firebase_admin._apps:
+        cred = _build_credentials()
+        if cred is None:
+            raise RuntimeError("Missing Firebase credentials")
+        firebase_admin.initialize_app(cred)
+
+    return firestore.client()
 
 
 def get_firestore_client():
@@ -46,14 +70,7 @@ def get_firestore_client():
         return None
 
     try:
-        if not firebase_admin._apps:
-            cred = _build_credentials()
-            if cred is None:
-                _init_error = "Missing Firebase credentials"
-                return None
-            firebase_admin.initialize_app(cred)
-
-        _firestore_client = firestore.client()
+        _firestore_client = _run_blocking(_init_firestore_client)
         _init_error = None
         return _firestore_client
     except Exception as exc:
@@ -76,7 +93,7 @@ def load_room_snapshot(room_id: str):
         return None
 
     try:
-        doc = client.collection(COLLECTION_NAME).document(room_id).get()
+        doc = _run_blocking(lambda: client.collection(COLLECTION_NAME).document(room_id).get())
         if not doc.exists:
             return None
         return doc.to_dict() or {}
@@ -98,7 +115,7 @@ def save_room_snapshot(room_id: str, snapshot: dict):
     payload["updatedAt"] = ts
 
     try:
-        client.collection(COLLECTION_NAME).document(room_id).set(payload)
+        _run_blocking(lambda: client.collection(COLLECTION_NAME).document(room_id).set(payload))
         return ts
     except Exception as exc:
         global _init_error
