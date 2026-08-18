@@ -1,0 +1,17 @@
+secrets/
+.venv/
+__pycache__/
+instance/
+.pytest_cache/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+*.log
+.env
+.env.local

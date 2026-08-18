@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: boardly-backend
+    runtime: python
+    plan: free
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --worker-class eventlet -w 1 wsgi:app
+    healthCheckPath: /health
+    envVars:
+      - key: FLASK_DEBUG
+        value: "0"
+      - key: SOCKETIO_ASYNC_MODE
+        value: eventlet
+      - key: LOG_LEVEL
+        value: INFO
+      - key: FIREBASE_COLLECTION_NAME
+        value: whiteboard_rooms
+      - key: SECRET_KEY
+        generateValue: true
+      - key: CORS_ORIGIN
+        sync: false
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        sync: false
