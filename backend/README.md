@@ -18,16 +18,21 @@ dev — never set it in production.
 
 ## Production
 
-Production uses `gunicorn` with the `eventlet` worker (required for real WebSocket support —
-`gunicorn` itself only runs on Linux/macOS, not Windows):
+Production uses `gunicorn` with the `gthread` worker (`gunicorn` itself only runs on Linux/macOS,
+not Windows):
 
 ```bash
-gunicorn --worker-class eventlet -w 1 wsgi:app
+gunicorn --worker-class gthread --threads 8 -w 1 wsgi:app
 ```
 
-`wsgi.py` monkey-patches with eventlet before anything else is imported; set
-`SOCKETIO_ASYNC_MODE=eventlet` so Flask-SocketIO's internal mode matches the worker. See
-`render.yaml` for a ready-to-use Render Blueprint, or `Procfile` for platforms that read one.
+Set `SOCKETIO_ASYNC_MODE=threading` to match. This deliberately avoids eventlet/gevent: `grpc`
+(used internally by `firebase-admin`) spawns its own background I/O threads via Python's
+`threading.Thread`, and green-thread monkey-patching turns those into cooperative greenthreads
+too — which silently breaks them and hangs the whole worker on the first real Firestore call,
+regardless of import/init timing. Plain OS threads sidestep this entirely, at the cost of
+Socket.IO falling back to long-polling instead of a raw WebSocket upgrade (the client does this
+automatically). See `render.yaml` for a ready-to-use Render Blueprint, or `Procfile` for platforms
+that read one.
 
 Required environment variables in production: `CORS_ORIGIN` (the deployed frontend's origin),
 `SECRET_KEY`, and either `FIREBASE_SERVICE_ACCOUNT_JSON` or `FIREBASE_SERVICE_ACCOUNT_PATH` if you

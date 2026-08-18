@@ -1,12 +1,12 @@
-"""Production entrypoint: `gunicorn --worker-class eventlet -w 1 wsgi:app`.
+"""Production entrypoint: `gunicorn --worker-class gthread --threads 8 -w 1 wsgi:app`.
 
-Deliberately does NOT call eventlet.monkey_patch() itself. gunicorn's eventlet
-worker class (gunicorn/workers/geventlet.py) already does that correctly,
-scoped to just the forked worker process, after fork. Calling it manually
-here would also run in the arbiter (master) process — which imports this
-module too, to validate the app before forking — and monkey-patching the
-arbiter breaks its own signal handling ("do not call blocking functions
-from the mainloop").
+Plain real-thread deployment — no eventlet/gevent monkey-patching. That
+trade-off (Socket.IO falls back to long-polling instead of a raw WebSocket
+upgrade) buys full compatibility with grpc, which firebase-admin uses
+internally and which does not coexist reliably with monkey-patched green
+threads: grpc spawns its own background I/O threads via Python's
+`threading.Thread`, and eventlet/gevent turn those into cooperative
+greenthreads too, silently breaking them regardless of import timing.
 """
 
 from app import app  # noqa: F401

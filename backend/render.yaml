@@ -5,13 +5,13 @@ services:
     plan: free
     region: oregon
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --worker-class eventlet -w 1 wsgi:app
+    startCommand: gunicorn --worker-class gthread --threads 8 -w 1 wsgi:app
     healthCheckPath: /health
     envVars:
       - key: FLASK_DEBUG
         value: "0"
       - key: SOCKETIO_ASYNC_MODE
-        value: eventlet
+        value: threading
       - key: LOG_LEVEL
         value: INFO
       - key: FIREBASE_COLLECTION_NAME
